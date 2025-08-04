@@ -10,6 +10,7 @@
 *.c text eol=lf
 *.bc2 text eol=crlf
 *.bc3 text eol=crlf
+*.md text eol=lf
 *.bin binary
 *.rom binary
 *.rel binary

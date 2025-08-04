@@ -1,6 +1,6 @@
 * MULTIMON
 * QL MONITOR/DISASSEMBLER
-* Copyright (C) 1986-2024 by Jan Bredenbeek
+* Copyright (C) 1986-2025 by Jan Bredenbeek
 * Parts of the source code (C) 2017-2018 by Norman Dunbar and Jan Bredenbeek
 *
 * Released under the GPL v3 license in 2017
@@ -33,7 +33,7 @@ STRING$   MACRO A
 * Definitions
 *--------------------------------------------------------------------          
           
-version   SETSTR    3.1             version number
+version   SETSTR    3.11            version number
 
 MMON.ID   EQU       $AA4D4F4E       ID for dataspace MULTIMON
 TOMB.ID   EQU       $AA544D42       ID for dataspace TOMB job

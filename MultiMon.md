@@ -1,7 +1,7 @@
-                                    QL MULTIMON V3.1
-                                    ----------------
+                                    QL MULTIMON V3.11
+                                    -----------------
 
-Copyright (C) 1986-2024 by JAN BREDENBEEK, the Netherlands
+Copyright (C) 1986-2025 by JAN BREDENBEEK, the Netherlands
 
 
 LEGAL STUFF
@@ -558,6 +558,12 @@ List of fixes and enhancements for MULTIMON v3.1, released on 19 February 2024
 
 - Manual updated and converted to .md for better display on web platforms
 
+List of fixes and enhancements for MULTIMON v3.11, released on 4 August 2025
+----------------------------------------------------------------------------
+
+- When MULTIMON catches an exception from a job it wasn't waiting for, the job
+  is now correctly suspended rather than thrown in an endless loop.
+  
 APPENDIX 4: Compatibility with QL Emulators
 -------------------------------------------
 MULTIMON v3.x has been tested with the following emulators:

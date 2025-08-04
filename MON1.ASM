@@ -1,6 +1,6 @@
 * MULTIMON
 * QL MONITOR/DISASSEMBLER
-* Copyright (C) 1986-2024 by Jan Bredenbeek
+* Copyright (C) 1986-2025 by Jan Bredenbeek
 * Parts of the source code (C) 2017-2018 by Norman Dunbar and Jan Bredenbeek
 * Released under the GPL v3 license in 2017
 *
@@ -437,11 +437,11 @@ GT_LOOP   MOVEQ     #MT_JINF,D0     ; get job info
           TRAP      #1
           TST.L     D0              ; valid job ID?
           BNE.S     GT_NOTF         ; no, exit
-          CMPI.W    #$60FE,(A0)     ; it must start with the BRA.S loop
-          BNE.S     GT_NEXT         ; if not, try next one
-          LEA       TOMB_DAT(A0),A1 ; point to assumed data space
-          CMPI.L    #TOMB.ID,(A1)+  ; check dataspace marker
+;          CMPI.W    #$60FE,(A0)     ; it must start with the BRA.S loop
+;          BNE.S     GT_NEXT         ; if not, try next one
+          CMPI.L    #TOMB.ID,2(A0)  ; check marker
           BNE.S     GT_NEXT         ; if not good, loop back
+          LEA       TOMB_DAT(A0),A1 ; point to assumed data space
           MOVE.L    (A1)+,D1        ; set job ID
           MOVEQ     #0,D0           ; exit with D0=0
           RTS
@@ -456,7 +456,7 @@ GT_NOTF   MOVEQ     #-2,D0          ; not found; return ERR.NJ
 GT_CREAT  MOVEQ     #0,D1           ; create with owner job 0 so it doesn't go
           MOVE.L    D1,A1           ; away with MultiMon, also zero A1
           MOVEQ     #TOMB_DAT,D2    ; required code space
-          MOVEQ     #EXTABEND,D3    ; only need exception table + marker
+          MOVE.L    #EXTABEND+128,D3 ; only need exception table + some space
           MOVEQ     #MT_CJOB,D0     ; create new job
           TRAP      #1
           TST.L     D0              ; OK?
@@ -467,17 +467,22 @@ GT_CREAT  MOVEQ     #0,D1           ; create with owner job 0 so it doesn't go
 GT_COPY   MOVE.W    (A2)+,(A1)+     ; copy job's code
           SUBQ.W    #2,D2
           BNE       GT_COPY
-          MOVE.L    #TOMB.ID,(A1)+  ; set dataspace ID
+;          MOVE.L    #TOMB.ID,(A1)+  ; set dataspace ID
           MOVE.L    D1,(A1)+        ; set job ID
 GT_END    TST.L     D0              ; set flags according to D0
           RTS
 
 ; The code for the TOMB job - only a looping instruction and identification
 
-TOMB_JOB  BRA.S     *
-          DC.L      0
+TOMB_JOB  BRA.S     T_SUSPND
+          DC.L      TOMB.ID
           DC.W      $4AFB
           STRING$   {'-TOMB-'}
+T_SUSPND  MOVEQ     #-1,D3          ; if we ever come here, suspend ourselves!
+          SUBA.L    A1,A1
+          MOVEQ     #MT_SUSJB,D0
+          TRAP      #1              ; This will force a reschedule
+          BRA       T_SUSPND        ; and loop around just in case
 TOMB_DAT  EQU       *-TOMB_JOB
 
 *--------------------------------------------------------------------
@@ -510,7 +515,7 @@ EXTABLE   DC.W      0,EXTRAP-*        ; Trap #5 to #15
 *--------------------------------------------------------------------
 * A small sign on message displayed at startup in the COMMAND WINDOW.
 *--------------------------------------------------------------------
-SIGNON    STRING$   {'MULTIMON V[version]',LF,127,' 1986-2024 Jan Bredenbeek',LF}
+SIGNON    STRING$   {'MULTIMON V[version]',LF,127,' 1986-2025 Jan Bredenbeek',LF}
 VARSMSG   STRING$   {'MULTIMON already active',LF}
 
 *--------------------------------------------------------------------
@@ -578,7 +583,7 @@ SAVREGS   MOVEM.L   D0-D2/A0/A5-A6,-(A7) ; Save some registers
           BLE       SR_DUMP         ; it has gone already!
           MOVE.L    D0,A5
           MOVE.W    #-1,JB_STAT(A5) ; set job to 'suspended'
-          SF        JB_WFLAG(A5)    ; signal 'no job waiting for completion'
+;          SF        JB_WFLAG(A5)    ; signal 'no job waiting for completion'
           LEA       JB_D0(A5),A5    ; point to register storage
           MOVE.L    (A7)+,(A5)+     ; save original D0
           MOVE.L    (A7)+,(A5)+     ; ... and D1
@@ -736,20 +741,20 @@ SRD_ALP   MOVE.L    (A3)+,D1
           BSR.S     SRD_OUT
 SRD_LF    LEA       LFMSG,A1        ; followed by LF
           BSR.S     SRD_OUT
-          LEA       HALT,A1
-          MOVE.L    A1,$42(A7)      ; return to HALT after RTE
+          LEA       TOMB_JOB,A1
+          MOVE.L    A1,$42(A7)      ; return to suspend job code
           BSR       GET_TOMB        ; locate Tomb job
-          BNE.S     SRD_REST        ; out of luck, leave PC at HALT
+          BNE.S     SRD_REST        ; out of luck
           BSR       FINDJB          ; get job table addr
           BNE.S     SRD_REST        ; shouldn't occur, but just in case
           MOVE.L    A0,SV_JBPNT(A6) ; make this current so PC gets saved in
           LEA       JB_END(A1),A1   ; Tomb job header, preserving original PC
-          MOVE.L    A1,$42(A7)      ; set job to loop forever in Tomb code
+          MOVE.L    A1,$42(A7)      ; set PC to suspend loop in Tomb job
 SRD_REST  MOVEM.L   (A7)+,D0-D7/A0-A6 ; restore registers
           ADDQ.L    #4,A7           ; discard return from SAVREGS call
           RTE                       ; return from exception
 
-HALT      BRA.S     *               ; keep looping around
+;HALT      BRA.S     *               ; keep looping around
 
 ; print value of D1.L in hex followed by space
           
@@ -832,7 +837,7 @@ RESTREGS  TRAP      #0              ; enter supervisor mode
           MOVE.L    A0,A2           ; pass to A2
           MOVE.L    EXJB_ID(A6),D1  ; job to be (re-)activated
           CMP.L     OWN_JB(A6),D1
-          BEQ.S     RR_BADJB        ; do not do this on ourself!
+          BEQ.S     RR_BADJB        ; do not do this on ourselves!
           BSR       FINDJB          ; now get monitored job's details
           BNE.S     RR_BADJB        ; it's gone - return to main loop
           TST.B     JB_PRINC(A1)    ; job's priority
@@ -4188,7 +4193,7 @@ HLP1_END  EQU       *
 *--------------------------------------------------------------------
 HELPMSG2  DC.W      HLP2_END-*-2
           DC.B      '                             QL MULTIMON V[version]',10
-          DC.B      '                       ',127,' 1986-2024 BY JAN BREDENBEEK',10,10
+          DC.B      '                       ',127,' 1986-2025 BY JAN BREDENBEEK',10,10
           DC.B      'COMMANDS:',10,10
           DC.B      188,189,190,191,': CHANGE MEMORY POINTER            ALT-',188,189,190,191,': CHANGE REGISTER POINTER',10
           DC.B      'F2: MEMORY DUMP TO SCREEN              F3: DISASSEMBLE TO SCREEN',10

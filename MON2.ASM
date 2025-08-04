@@ -1,7 +1,7 @@
 * MULTIMON
 * QL MONITOR/DISASSEMBLER
 * DISASSEMBLY ROUTINES
-* Copyright (C) 1986-1987 by Jan Bredenbeek
+* Copyright (C) 1986-2025 by Jan Bredenbeek
 * Parts of the source code (C) 2017-2018 by Norman Dunbar and Jan Bredenbeek
 * Released under the GPL v3 license in 2017
 *
