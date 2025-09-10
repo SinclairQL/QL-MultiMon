@@ -1,18 +1,18 @@
-                                    QL MULTIMON V3.11
-                                    -----------------
+                                    QL MULTIMON V3.20
+                                    =================
 
 Copyright (C) 1986-2025 by JAN BREDENBEEK, the Netherlands
 
 
 LEGAL STUFF
------------
+===========
 To keep it short: As of 2017, MULTIMON is covered by the GNU General Public 
 Licence v3. See https://github.com/janbredenbeek/QL-MultiMon/blob/master/LICENSE
 for details. This is also the place where you can find updates, give feedback
 etcetera.
 
 INTRODUCTION
-------------
+============
 MULTIMON is a monitor, disassembler and debugger for the Sinclair QL.
 This program allows you to inspect the QL's memory and test, disassemble and
 debug machine code programs. It is entirely written in machine code and very
@@ -26,7 +26,7 @@ may potentially crash the system.
 
 
 USING MULTIMON
---------------
+==============
 
 MULTIMON can be started in two ways:
 
@@ -61,8 +61,8 @@ SR = 0010000000000000      JB 00000000  REL ON
 
 3AFC0 43FA000A        LEA   $3AFCC,A1
 
-MULTIMON V3
-(C) 1986-2021 JAN BREDENBEEK
+MULTIMON V3.20
+(C) 1986-2025 JAN BREDENBEEK
 >
 ```
 
@@ -151,7 +151,22 @@ NOTE: Spaces are NOT allowed within an expression!
 
 
 COMMANDS
---------
+========
+
+General
+-------
+Commands consist of a single letter or keystroke, some of which take effect
+immediately and others prompt for arguments to be input. In general, if a
+command asks for input, you may cancel it by pressing the arrow-down key or
+the ESC key (the latter only on Minerva and SMSQ/E systems).
+
+When a command asks for a file name and the file is in the default data
+directory (set by the DATA_USE BASIC command0), you may omit that directory.
+So if your default data directory is win1_example_ and you want to load or save
+a file test_bin, entering 'test_bin' as file name is sufficient.
+
+Basic commands
+--------------
 F1: Displays Help page. Any key returns to the main display.
 
 F2: Displays a memory dump from the Memory Pointer address onwards. The left
@@ -160,6 +175,8 @@ F2: Displays a memory dump from the Memory Pointer address onwards. The left
 
 F3: Displays a disassembly from the Memory Pointer address onwards. Press ESC
     to leave the disassembly, any other key displays a new page.
+    
+F5: Refresh the MULTIMON windows.
 
 CURSOR LEFT (¼): Decrease the Memory Pointer by one.
 CURSOR RIGHT (½): Increase the Memory Pointer by one.
@@ -171,6 +188,15 @@ You can 'walk' through the registers D0 to D7 and A0 to A7, the status register
 (SR) and the job pointers BP and TP and subsequently set them using the 'R'
 command. It is not possible to set the supervisor stack pointer (SSP) in this
 way.
+
+CTRL+CURSOR LEFT (or Backspace): Go back in the history of previously visited 
+addresses (up to 25).
+
+CTRL+CURSOR RIGHT (or Delete): Go forward in the history of previously visited
+addresses (up to 25).
+
+CTRL-F: Go to the destination address of an instruction such as BRA, BSR, JMP,
+JSR or LEA.
 
 A: Change (alter) the memory from the Memory Pointer onwards.
 -------------------------------------------------------------
@@ -211,7 +237,7 @@ This disassembles a block of code to a file. Data areas which should not be
 disassembled (but marked as 'DC.x' instructions) may optionally be specified.
 This command requires the following parameters:
 
-- File name (must be specified in full);
+- File name (may be defaulted, uses default data directory set by DATA_USE);
 - Workspace size. This will be used to store address information used for
   generating labels during disassembly. By default, 1 Kilobyte is used which
   allows for 256 labels (each label occupies 4 bytes). When disassembling large
@@ -248,7 +274,7 @@ command. Note that it is sufficient to enter only the lower 16 bits of the job
 ID. For example, a job with id 00180003 may be examined by entering just '3' at
 the prompt.
 Alternatively, you may load an EXECutable program into memory by entering its
-(full) filename in response to the prompt. MULTIMON will then create a new job
+file name in response to the prompt. MULTIMON will then create a new job
 and load the program's code, but it will NOT start the job automatically (you
 may issue the 'J' command followed by 'S' as parameter if you want to start the
 job).
@@ -322,24 +348,20 @@ O: Toggle Relative Mode ('offset') on or off
 --------------------------------------------
 Normally, MULTIMON displays addresses as absolute values. In certain
 circumstances it may be convenient however to display the addresses as 
-relative to the start of the current job. This is the case in S*BASIC which
+relative to the start of the current job. This is the case in S\*BASIC which
 always addresses its data structures relative to A6 (which points to the start
-of the memory reserved for a S*BASIC job).
+of the memory reserved for a S\*BASIC job).
 When Relative mode is enabled, visible by the sign 'REL ON' in the register
 window, all addresses shown in the register and disassembly window are
 displayed as offsets from the Base Pointer address if (and only if) the
 absolute address lies between BP and TP (i.e. within the job's memory space).
-In disassemblies generated using the F3 key, these addresses will be displayed
-with a suffix (BP) to make clear that they are relative. 
-When disassembling using the 'D' command, in order to remain compatible with
-assembler syntax, the suffix (BP) will NOT be added to relative addresses.
-However, since MULTIMON will generate labels for these addresses there
-shouldn't be any confusion with absolute addresses within the same range.
+In disassemblies, these addresses will be displayed as labels ('LXXXX') to 
+make clear that they are relative.
 
 In addition, if address register A0 to A5, when added to BP, points to an
 address within the job's address range, the contents of the memory locations
 (BP+Ax) to (BP+Ax+7) will be displayed in the register window. This may be
-useful when examining S*Basic memory, since all addresses are specified
+useful when examining S\*Basic memory, since all addresses are specified
 relative to register A6 (which equals BP in case of S*Basic).
 
 EXAMPLE: If BP=$3C000, TP=$3E000 and A1=$1000, then if MULTIMON is in Relative
@@ -349,7 +371,7 @@ mode, it would show the contents of locations $1000 to $1007.
 Q: Quit MULTIMON
 ----------------
 This exits MULTIMON, removing all breakpoints set. When loaded using LRESPR,
-you can re-enter MULTIMON using the 'MON' command in S*Basic.
+you can re-enter MULTIMON using the 'MON' command in S\*Basic.
 
 R: Set a register value
 -----------------------
@@ -366,6 +388,10 @@ to 40 bytes enclosed in single quotes, to search for.
 MULTIMON will start searching at the current Memory Pointer address. If you
 enter an empty string, MULTIMON wil re-issue the search using the last string
 entered.
+The search will stop at the address pointed to by the TP pseudo-register, to
+avoid very long searches on the entire 4 GB address range. If you want to
+search outside the current job's memory space, simpy set TP to the desired
+value.
 
 T: Trace (single-step) instruction
 ----------------------------------
@@ -392,11 +418,31 @@ each job, the following information is displayed:
 
 - the job's ID (in hex);
 - the job's owner ID (in hex);
+- the job's start address (in hex);
 - the job's priority (prefixed by 'S' if suspended);
-- the job's name (if properly formatted by the job).
+- the job's name (if properly formatted by the job), or the name of the file
+  from which the job was loaded.
 
 In addition, it will display the QDOS or SMS version obtained by the MT.INF
 trap, and the free memory reported by the system.
+
+W: Write (save) bytes in memory to a file
+-----------------------------------------
+This command can be used to save a block of memory (usually a job's code) to
+a file. The command asks for the file name (which may be defaulted), the
+start address, end address and data space. When a job has been loaded using
+the 'E'xamine command, these values are automatically filled in but may be
+edited first.
+
+Note: For jobs loaded using the 'E' command, the default start address will be
+that of the BP pseudo-register, and the default end address will be the end of
+the job's code. This is usually different from the address shown by the TP
+pseudo-register, since that points to the end of the job's dataspace. You may
+safely use these defaults if the job has been loaded using the 'E' command,
+provided you do not change the size of its code.
+
+If you specify any nonzero value for the data space, the file will be saved as
+an EXECutable (type 1) file.
 
 X: eXecute an instruction
 -------------------------
@@ -405,10 +451,11 @@ instruction and then issuing a 'J'ump command. This differs from the 'T'race
 command in that in case of a branch (e.g. JSR, BSR, TRAP) the underlying code
 will be integrally executed until it returns.
 As this instruction relies on setting Breakpoints, it will only work in RAM.
+If you want to execute a subroutine in ROM, you can use the 'C'all command.
 
 
 APPENDIX 1: 68000 Exceptions
-----------------------------
+============================
 When invoked, MULTIMON will install its own exception table in QDOS using the
 MT.TRAPV call. This will also be the case with jobs examined by MULTIMON using
 the 'E' command. The original exception table will be restored when you switch
@@ -443,7 +490,7 @@ to an RTE instruction, else the vector will be copied from the original.
 
 
 APPENDIX 2: THE 'C', 'J', 'T' AND 'X' COMMANDS
-----------------------------------------------
+==============================================
 These commands activate the current job. It is not possible to issue them on
 the running copy of MULTIMON itself since this will crash MULTIMON (you will
 get an 'invalid job' or similar message). You may however load a second copy of
@@ -451,7 +498,7 @@ MULTIMON using the 'E' command and issue these commands on the second copy.
 
 
 APPENDIX 3: VERSION HISTORY
----------------------------
+===========================
 MULTIMON 1.0 was written in 1986 and one of my first projects to master 68K
 Assembly programming on the Sinclair QL.
 
@@ -560,10 +607,53 @@ List of fixes and enhancements for MULTIMON v3.1, released on 19 February 2024
 
 List of fixes and enhancements for MULTIMON v3.11, released on 4 August 2025
 ----------------------------------------------------------------------------
-
 - When MULTIMON catches an exception from a job it wasn't waiting for, the job
-  is now correctly suspended rather than thrown in an endless loop.
+  is now correctly suspended rather than thrown into an endless loop.
+
+List of fixes and enhancements for MULTIMON v3.20, released on 10 September 2025
+--------------------------------------------------------------------------------
+- Multimon remembers the last 25 memory locations visited. You can browse 
+  through the history using the CTRL-left (back) and CTRL-right (forward) arrow
+  keys. Every command that changes the Memory Pointer (except the arrow key 
+  commands) will record its location, so you can go back quickly now without
+  having to remember them.
+
+- Pressing CTRL-F when on an instruction with an effective destination address,
+  such as BRA, JSR, LEA etc., will set the Memory Pointer to that address.
+
+- Commands using file names now recognise the default data directory set by 
+  the DATA_USE command in Toolkit II and SMSQ/E.
+
+- In all disassembly views, destinations between the BP and TP pseudo-
+  registers are now shown as 'LXXXXX'. The (BP) suffix is no longer shown.
+  When generating a disassembly using the 'D' command, labels are generated
+  only when the address lies between BP and TP, not between the start and end
+  of the disassembly as in previous versions.
+
+- Finally: a W(rite) command to save a job or part of memory to a file.
+  By default, the start and end address will be taken from the BP and TP
+  pseudo-registers, but when the job has been loaded using the 'E'xamine
+  command only the code part will be saved (which may be different from TP).
+  Specifying a data size will set the file type to 1 (EXECutable).
+  As with the 'E' command, the DATAD$ default directory will be recognised.
   
+- Reworked user interface. Input prompts can be cancelled by pressing the
+  arrow-down key (or ESC on Minerva and SMSQ/E), and pressing arrow-up in the
+  'E'xamine prompt recalls the last file name entered. The 'V'ersion command
+  now uses the listing window to display its output and shows the start address
+  of each job as well.
+  
+- Added CONFIG block for configuring the following items:
+  - Window top left X and Y position. You can change this to any position on
+    the screen, but remember there must be room for a window of at least 454
+    pixels across and 202 pixels down. If you set these to daft values, 
+    MULTIMON won't start.
+  - Default paper and ink colours and banner paper and ink colours.
+  - Border colour.
+  
+- The 'S'earch command now exits when the address of TP has been reached. This
+  avoids long search times scanning though the entire 4GB address range...
+
 APPENDIX 4: Compatibility with QL Emulators
 -------------------------------------------
 MULTIMON v3.x has been tested with the following emulators:

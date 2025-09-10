@@ -496,15 +496,15 @@ EA_9A     EXT.L     D1              ; Sign extended to long word
 * disassembly (this writes Lxxxx, otherwise $xxxxx).
 *--------------------------------------------------------------------
 EA_ADDR   MOVEQ     #'$',D0         ; Assume literal address
-          TST.B     DISMOD(A6)      ; Single pass disassembly?
-          BLT.S     EA_BP           ; yes, write it
-          CMP.L     DISFRST(A6),D1  ; Before start?
+;          TST.B     DISMOD(A6)      ; Single pass disassembly?
+;          BLT.S     EA_BP           ; yes, write it
+          CMP.L     BASE_PNT(A6),D1 ; Before base?
           BCS.S     ST_LABEL        ; yes, jump
-          CMP.L     DISLAST(A6),D1  ; After end?
+          CMP.L     TOP_PNT(A6),D1  ; After top?
           BHI.S     ST_LABEL        ; yes, jump
           MOVEQ     #'L',D0         ; Make it a label
-          TST.B     DISMOD(A6)      ; 0 means 1st pass (collecting)
-          BGT.S     ST_LABEL        ; and 1 means 2nd pass (writing)
+          TST.B     DISMOD(A6)      ; only collecting labels?
+          BNE.S     ST_LABEL        ; no, store it
           MOVE.L    LBL_TBL(A6),A1  ; get start of label table
 EA_A_LP   CMPA.L    WRKSPTR(A6),A1  ; end reached?
           BGE.S     NEW_LABEL       ; yes, enter label
@@ -513,7 +513,10 @@ EA_A_LP   CMPA.L    WRKSPTR(A6),A1  ; end reached?
           BRA.S     ST_LABEL        ; Existing label found, skip
 NEW_LABEL JSR       ADD_WRK         ; Otherwise, enter new label
 ST_LABEL  MOVE.B    D0,(A0)+        ; Now write 'L' or '$'
+          MOVE.L    D1,DEST_AD(A6)  ; set current destination address
           JMP       CN_ADDR         ; .. followed by address
+
+          GENIF     0 = 1           ; code to be removed!
 
 *--------------------------------------------------------------------
 * This writes the literal address, possibly followed by (BP) in case
@@ -532,6 +535,8 @@ EA_BP_EN  RTS                       ; Done
 * relative to the base of the program (only in 1-pass disassemblies)
 *--------------------------------------------------------------------
 BPMSG     DC.B      '(BP)',0,0
+
+          ENDGEN
 
 *--------------------------------------------------------------------
 * EA Mode 10 - PC-relative with index                     nnnn(PC,Rn)
@@ -712,7 +717,7 @@ DISASSEM  LEA       DISBUF(A6),A0   ; Dissassembly buffer
 
 CLRDISBUF MOVE.B    D1,(A1)+        ; Clear a byte
           DBF       D0,CLRDISBUF    ; Do the rest
-
+          CLR.L     DEST_AD(A6)     ; clear destination address
 *--------------------------------------------------------------------
 * Convert the current address to hex first as a label - L######## but
 * only if A4 is in the labels table and we are on a multi-pass 

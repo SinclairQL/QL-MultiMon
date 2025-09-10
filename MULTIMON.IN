@@ -33,7 +33,7 @@ STRING$   MACRO A
 * Definitions
 *--------------------------------------------------------------------          
           
-version   SETSTR    3.11            version number
+version   SETSTR    3.20            version number
 
 MMON.ID   EQU       $AA4D4F4E       ID for dataspace MULTIMON
 TOMB.ID   EQU       $AA544D42       ID for dataspace TOMB job
@@ -41,13 +41,14 @@ DATASPACE EQU       2048            Stack space for the monitor
 LF        EQU       $0A             EOL character
 BKPTABSIZ EQU       10              Breakpoint table size
 NUMVECS   EQU       19              Number of exception vectors
+WINWIDTH  EQU       454             Window width
 
 * QDOS/SMSQ constants
 
-SV_KEYQ   EQU       $4C             Current keyboard queue
-SV_JBMAX  EQU       $62             Highest job number in system
-SV_JBPNT  EQU       $64             Ptr to current job table entry
-SV_JBBAS  EQU       $68             Ptr to base of job table
+;SV_KEYQ   EQU       $4C             Current keyboard queue
+;SV_JBMAX  EQU       $62             Highest job number in system
+;SV_JBPNT  EQU       $64             Ptr to current job table entry
+;SV_JBBAS  EQU       $68             Ptr to base of job table
 
 BV_RIP    EQU       $58             SBASIC Math stack pointer
 
@@ -70,8 +71,8 @@ JB_A7     EQU       $5C
 JB_SR     EQU       $60
 JB_PC     EQU       $62
 JB_END    EQU       $68             End of job header
-SV_TRAPV  EQU       $50             System vector for exception table
-SV_TRAPO  EQU       $54             Offset from SV.TRAPV vector to
+;SV_TRAPV  EQU       $50             System vector for exception table
+;SV_TRAPO  EQU       $54             Offset from SV.TRAPV vector to
 *                                   exception table
 
 *--------------------------------------------------------------------
@@ -91,6 +92,7 @@ EXTABEND  EQU       *               End of Exception vector table
 EXJB_ID   DS.L      1               ID of job to be Examined
 EXJB_TRP  DS.L      1               Job's original exception table vector
 EXJB_LEN  DS.L      1               Job's total length
+EXJB_TYP  DS.W      1               Job's file type
 EXJB_DAT  DS.L      1               Job's data size
 ; EXCPT_JB  DS.L      1               ID of job which caused last exception
 ; EXCPT_MS  DS.L      1               Pointer to exception message
@@ -112,13 +114,13 @@ IM_SSP    DS.L      1               Storage for Supervisor SP
 *--------------------------------------------------------------------
 * Channel IDs for the various windows that we have open.
 *--------------------------------------------------------------------
-GUARDWND  DS.L      1               Guardian window ID
+; GUARDWND  DS.L      1               Guardian window ID
 PROMPTWND DS.L      1               Prompt Windows ID
+AUXWND    DS.L      1               Auxiliary Window ID
 REGWND    DS.L      1               Register Window ID
 MEMWND    DS.L      1               Memory Window ID
-CMDWND    DS.L      1               Command Window ID
 DISWND    DS.L      1               Disassembly Window ID
-AUXWND    DS.L      1               Auxiliary Window ID
+CMDWND    DS.L      1               Command Window ID
 KEYQ      DS.L      1               Keyboard queue for our input
 
 MEMPTR    DS.L      1               Current memory pointer address
@@ -135,11 +137,28 @@ WRKSPTR   DS.L      1               First free space in workarea (DATATBL)
 WRK_END   DS.L      1               End of the above buffer - 16
 DISFRST   DS.L      1               First address to disassemble
 DISLAST   DS.L      1               Last address to disassemble
+DEST_AD   DS.L      1               Current destination address
+SBB_ADDR  DS.L      1               Address of scroll-back buffer area
+SBB_TOP   EQU       0               Address of top of SBB (relative)
+SBB_HEAD  EQU       4               Address of head of SBB (relative)
+SBB_TAIL  EQU       8               Address of tail of SBB (relative)
+SBB_BASE  EQU       12              Address of base of SBB (relative)
 MATHSTK   DS.L      1               Temp 4 byte maths stack (198 - 194)
 RELMOD    DS.B      1               Relative mode flag
 DISMOD    DS.B      1               Disassembly mode: <0 single, 0 or 1 multi-pass
 OPCODEFLG DS.B      1               Flag - $FF = Suppress Opcodes in disassembly
 WRKSPOV   DS.B      1               We overflowed the workspace flag ($FF = Overflow)
+
+*---------------------------
+* Table for location history
+*---------------------------
+
+LH.SIZE   EQU       25              Max. number of entries
+LH_CURR   DS.L      1               Current entry
+LH_MRU    DS.L      1               Most recent entry
+LH_LRU    DS.L      1               Least recent entry
+LH_BASE   DS.L      LH.SIZE         Location history buffer (longword entries)
+LH_END    EQU       *               End of history buffer
 
 *----------------------------------
 * Buffer for examined job file name

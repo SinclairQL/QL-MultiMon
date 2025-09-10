@@ -20,6 +20,10 @@
 
           INCLUDE   QDOS_IN    QDOS Constants
           INCLUDE   MULTIMON_IN     Macros and definitions
+          INCLUDE   ASSERT_INC
+          INCLUDE   ERR_INC
+          INCLUDE   SV_INC
+          INCLUDE   MULTICONFIG02
 
 *--------------------------------------------------------------------
 * External definitions
@@ -37,6 +41,8 @@
           XREF      CN_HEXB
           XREF      CN_HEXL
           XREF      ADD_WRK
+          XREF      OPEN_DEF
+          XREF      LH_INIT,LH_PUT,LH_GETB,LH_GETF
 
           DATA      DATASPACE       The dataspace required for this application
 
@@ -48,7 +54,7 @@
 *--------------------------------------------------------------------
 * Standard QDOS job header. 
 *--------------------------------------------------------------------
-MON_BASE  BRA.S     START
+MON_BASE  BRA.L     START
 
 *--------------------------------------------------------------------
 * Use the filler long word to hold the base address of the job's 
@@ -57,11 +63,53 @@ MON_BASE  BRA.S     START
 * 20200423-JB: It's actually quite easy, since we can PEEK SV.TRAPV
 *   for the exception table which lies in our dataspace...
 *--------------------------------------------------------------------
-MON_VARS  DC.L      0               ; Storage for variables address
+          DC.W      0               ; spare location
           DC.W      $4AFB           ; Job flag and name size
 MON_ID    STRING$   {'MULTIMON'}    ; Job name
           DS.W      0
 MON_CODE  EQU       *-MON_BASE      ; code size for MON command
+
+* CONFIG section
+
+        mkcfstart
+        mkcfhead {MULTIMON},{[version]}
+        
+          mkcfitem 'MON1',word,'X',WIN_TLX,,,\
+          {X Position of top left corner (0-511)},0,511
+
+          mkcfitem 'MON2',word,'Y',WIN_TLY,,,\
+          {Y Position of top left corner (0-255)},0,255
+
+          mkcfitem 'MON3',byte,'A',WIN_DPAP,,,\
+          {Default paper colour (0-255)},0,255
+
+          mkcfitem 'MON4',byte,'B',WIN_DINK,,,\
+          {Default ink colour (0-255)},0,255
+
+          mkcfitem 'MON5',byte,'C',WIN_BPAP,,,\
+          {Banner paper colour (0-255)},0,255
+
+          mkcfitem 'MON6',byte,'D',WIN_BINK,,,\
+          {Banner ink colour (0-255)},0,255
+
+          mkcfitem 'MON7',byte,'E',WIN_BCOL,,,\
+          {Border colour (0-255)},0,255
+
+        mkcfblend
+        
+        mkcfend
+
+
+* Base parameters for windows
+
+WIN_TLX   DC.W      30              ; Default X of top left corner
+WIN_TLY   DC.W      0               ; Default Y of top left corner
+WIN_DPAP  DC.B      0               ; Default window paper colour
+WIN_DINK  DC.B      7               ; Default window ink colour
+WIN_BPAP  DC.B      $D0             ; Prompt window paper colour
+WIN_BINK  DC.B      7               ; Prompt window ink colour
+WIN_BCOL  DC.B      2               ; Border colour (outline)
+WIN_BWID  DC.B      1               ; Border width
 
 *--------------------------------------------------------------------
 * Window definitions - moved here so they can be configured more
@@ -71,20 +119,37 @@ MON_CODE  EQU       *-MON_BASE      ; code size for MON command
 * values so all windows ended up overlapping each other!)
 *--------------------------------------------------------------------
 
-* Guardian window
+* New format for window parameters:
+* - word: use default colours (0) or prompt colours (2)
+* - word: window height
+* - word: Y origin wrt previous window (down)
+* - word: UT_CON or UT_SCR vector
 
-GUARDPAR  DC.B      0,0,0,7         ; use a guard window now!
-          DC.W      452,200,30,16
+;* Guardian window
+
+;GUARDPAR  DC.B      0,0,0,7         ; use a guard window now!
+;          DC.W      452,200,30,16
 
 *--------------------------------------------------------------------
 * This is the PROMPT window. (D7 = 5 in DO_OPEN)
 * The uppermost window displays a minimal help prompt all the time.
+* 20250904: Use now as guardian window, only write at top row
 *--------------------------------------------------------------------
-PRM_PAR   DC.B      2,1,0,7         ; Border col+width, paper, ink
-          DC.W      452,12,30,16    ; Width, height, x, y origin
+;PRM_PAR   DC.B      2,1,0,7         ; Border col+width, paper, ink
+;          DC.W      452,12,30,16    ; Width, height, x, y origin
+PRM_PAR   DC.W      2,202,0,UT_SCR
 
 *--------------------------------------------------------------------
-* This is the REGISTER window. (D7 = 4 in DO_OPEN)
+* This is the AUXILIARY window. (D7 = 4 in DO_OPEN)
+* The AUXILIARY WINDOW for Help and disassembly etc. 
+* NB: Height must be height of prompt window - 12!
+*--------------------------------------------------------------------          
+;AUX_PAR   DC.B      0,0,2,7         ; Border col+width, paper, ink
+;          DC.W      452,190,30,27   ; Width, height, x, y origin
+          DC.W      0,190,11,UT_CON
+
+*--------------------------------------------------------------------
+* This is the REGISTER window. (D7 = 3 in DO_OPEN)
 * The biggest window is to display the registers and the 8 bytes of
 * RAM around each of the An registers. Also seen here is:
 * 
@@ -96,61 +161,40 @@ PRM_PAR   DC.B      2,1,0,7         ; Border col+width, paper, ink
 *              relative or absolute addresses. Absolute are only the
 *              lower 5 digits though.
 *--------------------------------------------------------------------
-REG_PAR   DC.B      2,1,0,7         ; Border col+width, paper, ink
-          DC.W      452,112,30,28   ; Width, height, x, y origin
-          
+;REG_PAR   DC.B      2,1,0,7         ; Border col+width, paper, ink
+;          DC.W      452,112,30,28   ; Width, height, x, y origin
+          DC.W      0,110,0,UT_SCR
+
 *--------------------------------------------------------------------
-* This is the MEMORY window. (D7 = 3 in DO_OPEN)
+* This is the MEMORY window. (D7 = 2 in DO_OPEN)
 * The two line MEMORY WINDOW displays 17 byes around the address of
 * the memory pointer. There are 8 below and 8 above, which is 17 as
 * the current MP is there too, and highlighted.
 *--------------------------------------------------------------------          
-MEM_PAR   DC.B      2,1,0,7         ; Border col+width, paper, ink
-          DC.W      452,22,30,140   ; Width, height, x, y origin
-          
-*--------------------------------------------------------------------
-* This is the COMMAND window. (D7 = 2 in DO_OPEN)
-* The COMMAND WINDOW is where commands are entered and where the
-* sign on message is displayed at startup.
-*--------------------------------------------------------------------          
-CMD_PAR   DC.B      2,1,0,7         ; Border col+width, paper, ink
-          DC.W      452,42,30,174   ; Width, height, x, y origin
-          
+;MEM_PAR   DC.B      2,1,0,7         ; Border col+width, paper, ink
+;          DC.W      452,22,30,140   ; Width, height, x, y origin
+          DC.W      0,20,111,UT_SCR
+
 *--------------------------------------------------------------------
 * This is the DISSASSEM window. (D7 = 1 in DO_OPEN)
 * This window is above the COMMAND WINDOW and displays a disassembly
 * of the instruction at the current MP's address.
 *--------------------------------------------------------------------          
-DIS_PAR   DC.B      2,1,0,7         ; Border col+width, paper, ink
-          DC.W      452,12,30,162   ; Width, height, x, y origin
-          
-*--------------------------------------------------------------------
-* This is the AUXILIARY window. (D7 = 0 in DO_OPEN)
-* The AUXILIARY WINDOW for Help and disassembly etc. 
-*--------------------------------------------------------------------          
-AUX_PAR   DC.B      0,0,2,7         ; Border col+width, paper, ink
-          DC.W      452,190,30,27   ; Width, height, x, y origin
-          
-*--------------------------------------------------------------------
-* Window parameters for the main windows:
-*
-* Border Colour = Red
-* Border Width = 1
-* Paper/Strip Colour = Black
-* Ink Colour = White
-*--------------------------------------------------------------------          
-*WNDPAR1   DC.B      0,0,0,7        ; should be obsolete now!
+;DIS_PAR   DC.B      2,1,0,7         ; Border col+width, paper, ink
+;          DC.W      452,12,30,162   ; Width, height, x, y origin
+          DC.W      0,10,21,UT_SCR
 
 *--------------------------------------------------------------------
-* Window parameters for the help window:
-*
-* Border Colour = Black
-* Border Width = 0
-* Paper/Strip Colour = Red
-* Ink Colour = White
-*--------------------------------------------------------------------
-*WNDPAR2   DC.B      0,0,2,7        ; should be obsolete now!
+* This is the COMMAND window. (D7 = 0 in DO_OPEN)
+* The COMMAND WINDOW is where commands are entered and where the
+* sign on message is displayed at startup.
+* NB: Height must be height of prompt window - (111+21+11) !
+*--------------------------------------------------------------------          
+;CMD_PAR   DC.B      2,1,0,7         ; Border col+width, paper, ink
+;          DC.W      452,42,30,174   ; Width, height, x, y origin
+          DC.W      0,47,11,UT_CON
 
+*** START OF MAIN PROGRAM
                                     
 *--------------------------------------------------------------------
 * Call MT_INF to get the current jobid in D1.L. If this is zero, we
@@ -256,7 +300,7 @@ SETVEC_R  RTS
 *
 *--------------------------------------------------------------------
 * Point A6.L at the absolute address of the dataspace area for this
-* job, then save it in MON_VARS.
+* job, then save it in SYSVARS
 *--------------------------------------------------------------------          
 START2    ADDA.L    A4,A6           ; A6 = Start of data space
           MOVE.L    A6,A0
@@ -300,46 +344,64 @@ COPYRGDS  MOVE.B    (A1)+,(A0)+     ; copy over the template
 *--------------------------------------------------------------------          
           CLR.L     MEMPTR(A6)      ; Current memory address
           ST        RELMOD(A6)      ; $FF = Relative, $00 = Absolute
+          JSR       LH_INIT         ; initialise location history
 
 *--------------------------------------------------------------------
 * There are 6 separate windows to be opened at startup. D7 has the
 * count and A4 points at the first window definition, A5 points at 
 * the start of a consecutive storage area for the channel IDs. 
 *--------------------------------------------------------------------
-          MOVEQ     #6,D7           ; 6 windows to open
-          LEA       GUARDPAR,A4     ; PROMPT window definition
-          LEA       GUARDWND(A6),A5    ; First window's storage area
+          MOVEQ     #5,D7           ; 6 windows to open
+;          LEA       GUARDPAR,A4     ; PROMPT window definition
+;          LEA       GUARDWND(A6),A5    ; First window's storage area
+          ASSERT    PROMPTWND,AUXWND-4,REGWND-8,MEMWND-12,DISWND-16,CMDWND-20
+
+          LEA       PRM_PAR(PC),A4
+          LEA       PROMPTWND(A6),A5
+          SUBA.W    #4*2+4,A7       ; make room for window parameters
+          MOVE.W    WIN_BCOL(PC),(A7) ; border colour & width
+          MOVE.W    #WINWIDTH,4(A7) ; window width (same for all)
+          MOVE.L    WIN_TLX(PC),8(A7) ; top left corner coords
 
 *--------------------------------------------------------------------
-* A loop to open the 5 windows used by the monitor. 
+* A loop to open the 6 windows used by the monitor. 
 *--------------------------------------------------------------------
-OPEN_LP   MOVE.L    A4,A1           ; Pointer to Window definition
-          MOVE.W    UT_SCR,A2       ; Assume SCR type window
-          CMPI.W    #2,D7           ; Only the cmd window is CON type
-          BNE.S     DO_OPEN         ; - skip if not that one
-          MOVE.W    UT_CON,A2       ; For command window use UT_CON
+OPEN_LP   LEA       WIN_DPAP(PC),A0
+          MOVE.W    (A4)+,D0        ; paper/ink colour set
+          MOVE.W    (A0,D0.W),2(A7)
+          MOVE.W    (A4)+,6(A7)     ; window height
+          MOVE.W    (A4)+,D0
+          ADD.W     D0,10(A7)       ; adjust Y origin downwards
+          MOVE.W    (A4)+,A2        ; UT_CON or UT_SCR vector
+          MOVE.L    A7,A1           ; window parameter buffer
+          MOVE.W    (A2),A2         ; UT_CON/UT_SCR routine
 
 *--------------------------------------------------------------------
 * Open a single window and set its attributes. A0 is the window's
 * definition and A1 is the attributes.
 *--------------------------------------------------------------------
 DO_OPEN   JSR       (A2)            ; Open the window
-          BNE       QMON_1          ; Exit from monitor on error 
-          MOVE.L    A0,(A5)+        ; Save this channel ID.
-          ADDA.W    #4+2*4,A4       ; The next window definition
+          BNE       QMON_1          ; Exit from monitor on error
+          TST.W     (A7)            ; first window has border
+          BEQ.S     OPEN_NXT        ; if not, skip
+          CLR.W     (A7)            ; clear border for next windows
+          SUBQ.W    #4,4(A7)        ; ... and adjust X and Y origin
+          ADDQ.W    #2,8(A7)
+OPEN_NXT  MOVE.L    A0,(A5)+        ; Save this channel ID.
           DBF       D7,OPEN_LP      ; Do the rest
+          ADDA.W    #4*2+4,A7       ; cleanup buffer
 
-** EXPERIMENTAL **: set outline of guardian window for a nice shadow!
+;** EXPERIMENTAL **: set outline of guardian window for a nice shadow!
 
-IOP.OUTL  EQU       $7A
+;IOP.OUTL  EQU       $7A
 
-          MOVE.L    #$00080006,D1
-          MOVEQ     #0,D2
-          MOVEQ     #-1,D3
-          MOVE.L    GUARDWND(A6),A0
-          LEA       GUARDPAR+4,A1
-          MOVEQ     #IOP.OUTL,D0
-*          TRAP      #3
+;          MOVE.L    #$00080006,D1
+;          MOVEQ     #0,D2
+;          MOVEQ     #-1,D3
+;          MOVE.L    GUARDWND(A6),A0
+;          LEA       GUARDPAR+4,A1
+;          MOVEQ     #IOP.OUTL,D0
+;          TRAP      #3
 
 *--------------------------------------------------------------------
 * Clear out a couple of storage areas and then enter a loop to zero
@@ -917,16 +979,22 @@ FINMSG    STRING$   {'Job has finished',LF}
 * time. Exits with the data length stored at the start of the buffer,
 * but does not include the newline character, and A1 pointing at the
 * data length word.
+* NB: String will be in DISBUF with length word first
+* NB2: Calls IO.EDLIN to edit string, clear DISBUF(A6) first if empty
 *--------------------------------------------------------------------
 RDSTRING  LEA       DISBUF(A6),A2   ; Buffer address
-          CLR.W     (A2)+           ; Initalise null string
+          MOVE.W    (A2)+,D1        ; initialise length
           MOVEQ     #DISBUFLEN-2,D2 ; Buffer size
           BSR.S     RDLIN_2         ; Fetch some text
           BNE.S     RDS_RTS         ; Return immediately with errors
           SUBQ.W    #1,D1           ; Discount the newline
           MOVE.W    D1,-(A1)        ; Save the data length
+          BEQ.S     RDS_NC          ; empty string?
           MOVEQ     #0,D0           ; Ensure no error status
 RDS_RTS   RTS                       ; Done
+
+RDS_NC    MOVEQ     #ERR.NC,D0      ; ERR.NC with empty string
+          RTS
 
 *--------------------------------------------------------------------
 * Enter at READ_LINE to default to using the buffer at DISBUF(A6) for
@@ -936,22 +1004,38 @@ RDS_RTS   RTS                       ; Done
 * stored in it.
 *--------------------------------------------------------------------
 READ_LINE LEA       DISBUF(A6),A2   ; Buffer address
+          MOVEQ     #0,D1           ; initial length
           MOVEQ     #DISBUFLEN,D2   ; Buffer size
 
 *--------------------------------------------------------------------
 * Enter at RDLIN_2 when you want to specify the buffer and maximum
 * buffer size instead of the defaults. Just reads the input from
 * the user. Exits with A1 pointing at the buffer start address.
+* 20250905: Now uses IO.EDLIN to allow for editing previous input.
+* Call with D1: current line length, D2: buffer length, A2: buffer
+* Returns ERR.NC if user cancelled using arrow-down or ESC.
 *--------------------------------------------------------------------
 RDLIN_2   MOVE.L    CMDWND(A6),A0   ; COMMAND window ID
           MOVEQ     #-1,D3          ; Timeout
+          MOVE.W    D1,-(A7)        ; save current length
           MOVEQ     #':',D1         ; Colon to send (No, really???)
           MOVEQ     #IO_SBYTE,D0
           TRAP      #3              ; Send colon
-          MOVE.L    A2,A1           ; Buffer address
-          MOVEQ     #IO_FLINE,D0
+          MOVEQ     #0,D1           ; ensure msw of D1 is 0 for edlin
+          MOVE.W    (A7)+,D1        ; restore current length
+          LEA       (A2,D1.W),A1    ; One past last character for edlin
+          MOVEQ     #IO_EDLIN,D0    ; NEW: use EDLIN rather than FLINE
           TRAP      #3              ; Fetch some input
-          MOVE.L    A2,A1           ; Restore buffer address
+          TST.L     D0              ; any error (buffer overflow etc)?
+          BNE.S     RDLIN_END       ; yes, bail out
+          CMPI.B    #LF,-(A1)       ; was it terminated with ENTER?
+          BEQ.S     RDLIN_END       ; yes, exit with OK from trap
+          MOVEQ     #1,D0           ; prepare for +ve error exit
+          CMPI.B    #$D0,(A1)       ; arrow-up?
+          BEQ.S     RDLIN_LF        ; yes
+          MOVEQ     #ERR.NC,D0      ; else, return 'not complete'
+RDLIN_LF  MOVE.B    #LF,(A1)        ; ensure line is terminated with LF
+RDLIN_END MOVE.L    A2,A1           ; Restore buffer address
           TST.L     D0              ; NEW: set status flags
           RTS                       ; Done
 
@@ -1342,13 +1426,16 @@ RDBIN_LP  MOVE.B    (A1),D0         ; Grab a character
 *--------------------------------------------------------------------
 DSPROMPT  MOVE.L    PROMPTWND(A6),A0    ; PROMPT window ID
           MOVEQ     #-1,D3          ; Timeout
-          MOVEQ     #SD_CLEAR,D0
+          MOVEQ     #0,D1
+          MOVEQ     #0,D2
+          MOVEQ     #SD_POS,D0
+          TRAP      #3
+          MOVEQ     #SD_CLRLN,D0    ; only upper row!
           TRAP      #3              ; CLS PROMPT window
-
-          MOVEQ     #1,D1           ; 8 Pixels wide
-          MOVEQ     #0,D2           ; 10 Pixels high
-          MOVEQ     #SD_SETSZ,D0
-          TRAP      #3              ; Set character sizes
+;          MOVEQ     #1,D1           ; 8 Pixels wide
+;          MOVEQ     #0,D2           ; 10 Pixels high
+;          MOVEQ     #SD_SETSZ,D0
+;          TRAP      #3              ; Set character sizes
 
           LEA       PROMPTMSG,A1    ; Message to print
           MOVE.W    UT_MTEXT,A2     
@@ -1358,8 +1445,7 @@ DSPROMPT  MOVE.L    PROMPTWND(A6),A0    ; PROMPT window ID
 *--------------------------------------------------------------------
 * This message should be visible in the PROMPT window at all times.
 *--------------------------------------------------------------------
-PROMPTMSG DC.W      45
-          DC.B      'F1 = Help  F2 = Memory Dump  F3 = Disassemble'
+PROMPTMSG STRING$   {'F1: Help  F2: Memory Dump  F3: Disassemble  F5: Refresh screen'}
           DS.W      0
 
 *--------------------------------------------------------------------
@@ -1642,7 +1728,7 @@ DSPRSP    MOVE.W    REGPTR(A6),D0   ; Current register pointer
           MOVE.B    D4,D1           ; Character to print
           MOVEQ     #IO_SBYTE,D0
           TRAP      #3              ; Print cursor character
-          MOVE.B    REG_PAR+2,D1    ; Original strip colour
+          MOVE.B    WIN_DPAP(PC),D1 ; Original strip colour
           MOVEQ     #SD_SETST,D0
           TRAP      #3              ; Set black strip
           RTS
@@ -1739,10 +1825,10 @@ DM_CONV   JSR       CN_HEXB         ; Convert D1.B to two hex chars
 * Print memory pointer in inverse colours - now we take then from the
 * configured parameters in MEMPAR rather than hard-code them!
 
-          MOVE.B    MEM_PAR+2,D1    ; Get paper colour for ink
+          MOVE.B    WIN_DPAP(PC),D1 ; Get paper colour for ink
           MOVEQ     #SD_SETIN,D0
           TRAP      #3              ; Set ink to 'paper' colour
-          MOVE.B    MEM_PAR+3,D1    ; Ink colour for strip
+          MOVE.B    WIN_DINK(PC),D1 ; Ink colour for strip
           MOVEQ     #SD_SETST,D0
           TRAP      #3              ; Set strip to 'ink' colour
 
@@ -1760,10 +1846,10 @@ DM_PRT    LEA       DISBUF(A6),A1   ; Hex buffer
 
           CMPA.L    MEMPTR(A6),A4   ; Are we on the memory pointer?
           BNE.S     DM_NEXT         ; No, skip to next
-          MOVE.B    MEM_PAR+3,D1    ; Get original ink colour
+          MOVE.B    WIN_DINK(PC),D1 ; Get original ink colour
           MOVEQ     #SD_SETIN,D0
           TRAP      #3              ; Reset ink
-          MOVE.B    MEM_PAR+2,D1    ; Get original strip
+          MOVE.B    WIN_DPAP(PC),D1 ; Get original strip
           MOVEQ     #SD_SETST,D0
           TRAP      #3              ; Reset strip
 DM_NEXT   DBF       D7,DM1_LP       ; Do the other offset headers
@@ -1793,27 +1879,6 @@ DM_NEXT   DBF       D7,DM1_LP       ; Do the other offset headers
           TRAP      #3              ; Print the whole buffer
           RTS                       ; Done
 
-*          SUBQ.W    #8,A4           ; First byte offset
-*          MOVEQ     #16,D7          ; 17 bytes to print this time
-
-*--------------------------------------------------------------------
-* For each of the 17 bytes, print a space then the two hex characters
-* making up the value.
-*--------------------------------------------------------------------
-*DM2_LP    MOVEQ     #$20,D1         ; Start with a space (= column 4)
-*          MOVEQ     #IO_SBYTE,D0
-*          TRAP      #3              ; Print a space
-*          LEA       DISBUF(A6),A0   ; Disassembly buffer
-*          MOVE.B    (A4)+,D1        ; Get offset byte
-*          JSR       CN_HEXB         ; Convert to hex
-*          MOVE.L    MEMWND(A6),A0   ; MEMORY window ID
-*          LEA       DISBUF(A6),A1   ; Output buffer
-*          MOVEQ     #2,D2           ; 2 bytes to print
-*          MOVEQ     #IO_SSTRG,D0
-*          TRAP      #3              ; Print two bytes
-*          DBF       D7,DM2_LP       ; Do remaining offset bytes
-*          RTS                       ; Done
-
 *--------------------------------------------------------------------
 * DISASSEMBLY WINDOW HANDLER
 *
@@ -1834,10 +1899,6 @@ DSPDIS    MOVE.L    DISWND(A6),A0   ; DISASSEMBLY window ID
           MOVEQ     #-1,D3
           MOVEQ     #SD_CLEAR,D0
           TRAP      #3              ; CLS DISASSEMBLY window
-*          MOVEQ     #1,D1           ; 8 Pixels wide
-*          MOVEQ     #0,D2           ; 10 Pixels high
-*          MOVEQ     #SD_SETSZ,D0
-*          TRAP      #3              ; Set character sizes
           MOVE.L    MEMPTR(A6),A4   ; Current memory address
           ST        DISMOD(A6)      ; Single pass disassembly
           JSR       DISASSEM        ; Go do a disassembly
@@ -2048,11 +2109,16 @@ RST_OPC   MOVEQ     #0,D0           ; Flag no breakpoint here
 * U: Undo breakpoint at current memory address.
 *--------------------------------------------------------------------
 UNDO_BRK  BSR.S     REMOVEBRK       ; Look for and remove the breakpoint
-          BEQ       MAIN_REG
+          BEQ.S     MAIN_REG
           LEA       NOBRKMSG,A1
           BRA.S     MAIN_ERR        ; And back to the main loop
 
 NOBRKMSG  STRING$   {'Not a Breakpoint',LF}
+
+NULMSG    DC.W      0
+
+CMD_RFSH  LEA       NULMSG,A1       ; no message, just refresh (F5)
+          BRA.S     MAIN_ERR
 
 *--------------------------------------------------------------------
 * MAIN EXECUTION LOOP
@@ -2089,34 +2155,34 @@ IOP.PICK  EQU       $7B
 ;          MOVEQ     #-2,D1
           MOVEQ     #0,D2           ; Nothing to wake
           MOVEQ     #-1,D3          ; Timeout
-          MOVE.L    CMDWND(A6),A0 ; Guardian (primary) window ID
+          MOVE.L    PROMPTWND(A6),A0 ; Prompt (primary) window ID
           MOVEQ     #IOP.PICK,D0    ; Pick our window to top of pile
           TRAP      #3
 ***
 
-          MOVEQ     #4,D7           ; we have 5 windows
-          LEA       PRM_PAR,A3      ; point first window's def block
+;          MOVEQ     #4,D7           ; we have 5 windows
+;          LEA       PRM_PAR,A3      ; point first window's def block
           
-* Enter a loop to reset windows if they have been altered by a MODE call
+;* Enter a loop to reset windows if they have been altered by a MODE call
           
-          LEA       PROMPTWND(A6),A4 ; first window channel ID
-          MOVEQ     #0,D2           ; clear D2 - needed for SD.BORDR?
-          MOVEQ     #-1,D3          ; timeout
-BRD_LOOP  MOVE.L    (A4)+,A0        ; channel ID
-          MOVE.B    (A3)+,D1        ; Border colour
-          MOVE.B    (A3)+,D2        ; Border width
-          MOVEQ     #SD_BORDR,D0
-          TRAP      #3              ; Reset border
-          ADDA.W    #2+4*2,A3       ; point to next window def block
-          DBF       D7,BRD_LOOP     ; Loop for all 5 windows
-          MOVE.L    CMDWND(A6),A0   ; command window ID
+;          LEA       PROMPTWND(A6),A4 ; first window channel ID
+;          MOVEQ     #0,D2           ; clear D2 - needed for SD.BORDR?
+;          MOVEQ     #-1,D3          ; timeout
+;BRD_LOOP  MOVE.L    (A4)+,A0        ; channel ID
+;          MOVE.B    (A3)+,D1        ; Border colour
+;          MOVE.B    (A3)+,D2        ; Border width
+;          MOVEQ     #SD_BORDR,D0
+;          TRAP      #3              ; Reset border
+;          ADDA.W    #2+4*2,A3       ; point to next window def block
+;          DBF       D7,BRD_LOOP     ; Loop for all 5 windows
+          MOVE.L    PROMPTWND(A6),A0   ; Prompt (overlapping) window
           MOVEQ     #SD_CLEAR,D0
-          TRAP      #3              ; clear window
-*          MOVEQ     #1,D1
-*          MOVEQ     #0,D2
-*          MOVEQ     #SD_SETSZ,D0
-*          TRAP      #3              ; reset character size
+          TRAP      #3              ; clear it
+          MOVE.L    CMDWND(A6),A0
+          MOVEQ     #SD_CLEAR,D0
+          TRAP      #3              ; clear command window as well
           MOVE.L    A2,A1           ; now print message
+                    
           MOVE.W    UT_MTEXT,A2
           JSR       (A2)
           BSR       DSPROMPT        ; Duplicate code - but avoids LF being
@@ -2195,9 +2261,9 @@ SEARCHTAB LEA       CMDTAB,A2       ; The command table
 * Look for the next command in the command table if we haven't found
 * the one corresponding to D1.B yet.
 *--------------------------------------------------------------------
-NEXTCMD   MOVE.W    (A2)+,D0        ; Get the next command word
+NEXTCMD   MOVE.W    (A2)+,D2        ; Get the next command word
           BEQ.S     MAIN_1          ; All done. Invalid command
-          CMP.B     D0,D1           ; Is this our command?
+          CMP.B     D1,D2           ; Is this our command?
           BEQ.S     CMDFOUND        ; Hooray!
           ADDQ.L    #2,A2           ; Skip over the command's offset
           BRA.S     NEXTCMD         ; And keep searching
@@ -2207,7 +2273,7 @@ NEXTCMD   MOVE.W    (A2)+,D0        ; Get the next command word
 * bit 7 set, indicating negative values. This is used to good effect.
 *--------------------------------------------------------------------
 CMDFOUND  ADDA.W    (A2),A2         ; Add the offset to the command code
-          TST.B     D1              ; Letter command or arrow etc command?
+          CMPI.B    #$20,D1         ; Letter command or arrow etc command?
           BLT.S     JMPCMD          ; Non-letter commands don't echo
           MOVEQ     #IO_SBYTE,D0    ; Letter commands do echo to the
           TRAP      #3              ; COMMAND WINDOW
@@ -2243,6 +2309,12 @@ CMDTAB    DC.W      $C0             ; Arrow LEFT Change Memory Pointer
           DC.W      $D9             ; ALT Arrow DOWN Change Register Pointer
           DC.W      RP_ADD1-*
 
+          DC.W      $C2             ; CTRL Arrow LEFT - Back in address history
+          DC.W      HIS_BACK-*
+          
+          DC.W      $CA             ; CTRL Arrow RIGHT - Forward in history
+          DC.W      HIS_FWD-*
+
           DC.W      $E8             ; F1 Help
           DC.W      HELP-*
 
@@ -2251,6 +2323,9 @@ CMDTAB    DC.W      $C0             ; Arrow LEFT Change Memory Pointer
 
           DC.W      $F0             ; F3 Dissassemble
           DC.W      DIS_PAGE-*
+          
+          DC.W      $F8             ; F5 Refresh screen
+          DC.W      CMD_RFSH-*
 
           DC.W      ' A'            ; A Alter memory
           DC.W      ALT_MEM-*
@@ -2311,52 +2386,21 @@ CMDTAB    DC.W      $C0             ; Arrow LEFT Change Memory Pointer
 
           DC.W      ' U'            ; U Remove (undo) breakpoint
           DC.W      UNDO_BRK-*
+          
+          DC.W      ' W'            ; W Write memory to file
+          DC.W      WR_FILE-*
 
           DC.W      ' V'            ; V Display system info, list of jobs etc
           DC.W      VERSION-*
 
           DC.W      ' X'            ; X Execute current instruction
           DC.W      XECUTE-*
+          
+          DC.W      'F'-$40         ; CTRL-F follow destination address
+          DC.W      FLW_DEST-*
 
           DC.W      0               ; End of table
 
-*--------------------------------------------------------------------
-* Arrow LEFT - decrement current memory pointer.
-*--------------------------------------------------------------------
-LEFT      MOVEQ     #-1,D1          ; Decrement by 1
-          BRA.S     AMEMPTR
-
-*--------------------------------------------------------------------
-* Arrow RIGHT - increment current memory pointer.
-*--------------------------------------------------------------------
-RIGHT     MOVEQ     #1,D1           ; Increment by 1
-          BRA.S     AMEMPTR
-
-*--------------------------------------------------------------------
-* Arrow DOWN - decrement current memory pointer by 8.
-*--------------------------------------------------------------------
-LEFT8     MOVEQ     #-8,D1          ; Decrement by 8
-          BRA.S     AMEMPTR
-
-*--------------------------------------------------------------------
-* Arrow UP - increment current memory pointer by 8.
-*--------------------------------------------------------------------
-RIGHT8    MOVEQ     #8,D1           ; Increment by 8
-          BRA.S     AMEMPTR
-
-*--------------------------------------------------------------------
-* Entry here means we prompt for an address, before dropping in.
-*--------------------------------------------------------------------
-ADD_MEM   BSR       GETADDR1        ; Read an address expression
-
-*--------------------------------------------------------------------
-* Called from LEFT, RIGHT, UP, DOWN to change the address of the 
-* current memory pointer. D1.L is the offset that will be added to
-* the current address. The MEMORY WINDOW is redrawn to display the
-* new data - 8 bytes below and 8 bytes above the current MP.
-*--------------------------------------------------------------------
-AMEMPTR   ADD.L     D1,MEMPTR(A6)   ; Adjust the memory pointer
-          BRA       MAIN_MEM        ; And go round again
 
 *--------------------------------------------------------------------
 * Q: Quit the program.
@@ -2443,6 +2487,71 @@ ADDERRMSG STRING$   {'Syntax error in expression'}
           DS.W      0
 
 *--------------------------------------------------------------------
+* Arrow LEFT - decrement current memory pointer.
+*--------------------------------------------------------------------
+LEFT      MOVEQ     #-1,D1          ; Decrement by 1
+          BRA.S     AMEMPTR
+
+*--------------------------------------------------------------------
+* Arrow RIGHT - increment current memory pointer.
+*--------------------------------------------------------------------
+RIGHT     MOVEQ     #1,D1           ; Increment by 1
+          BRA.S     AMEMPTR
+
+*--------------------------------------------------------------------
+* Arrow DOWN - decrement current memory pointer by 8.
+*--------------------------------------------------------------------
+LEFT8     MOVEQ     #-8,D1          ; Decrement by 8
+          BRA.S     AMEMPTR
+
+*--------------------------------------------------------------------
+* Arrow UP - increment current memory pointer by 8.
+*--------------------------------------------------------------------
+RIGHT8    MOVEQ     #8,D1           ; Increment by 8
+          BRA.S     AMEMPTR
+
+*--------------------------------------------------------------------
+* Entry here means we prompt for an address, before dropping in.
+*--------------------------------------------------------------------
+ADD_MEM   BSR.S     GETADDR1        ; Read an address expression
+
+*--------------------------------------------------------------------
+* Called from LEFT, RIGHT, UP, DOWN to change the address of the 
+* current memory pointer. D1.L is the offset that will be added to
+* the current address. The MEMORY WINDOW is redrawn to display the
+* new data - 8 bytes below and 8 bytes above the current MP.
+*--------------------------------------------------------------------
+AMEMPTR   ADD.L     D1,MEMPTR(A6)   ; Adjust the memory pointer
+          TST.B     D2              ; check command code
+          BMI.S     MAIN_M2         ; Return to main with arrow commands
+          JSR       LH_PUT          ; else, put location in history
+          BRA.S     SMEM_1          ; And go round again
+
+* ---------------------------------------------------------
+* NEW: Follow destination of JMPs, BRAs, LEAs etc. (CTRL-F)
+* ---------------------------------------------------------
+FLW_DEST  MOVE.L    DEST_AD(A6),D1  ; get destination address
+          BEQ.S     MAIN_M2         ; nothing, bail out
+          MOVE.L    D1,MEMPTR(A6)   ; set new memptr
+          JSR       LH_PUT          ; put it in history
+          BRA.S     MAIN_M2
+
+*------------------------------------------------------------------------
+* NEW: go back and forward in location history (ctrl-left and ctrl-right)
+*------------------------------------------------------------------------
+
+HIS_BACK  JSR       LH_GETB         ; Back in history
+          BRA.S     HIS_ENT
+          
+HIS_FWD   JSR       LH_GETF         ; Forward in history
+HIS_ENT   BNE.S     MAIN_M2         ; Store unless nothing found
+          MOVE.L    D1,MEMPTR(A6)
+MAIN_M2   MOVEQ     #0,D1
+          MOVEQ     #SD_TAB,D0      ; Reset column position for arrow cmds
+          TRAP      #3
+          BRA.S     SMEM_1          ; Show new mem+dis window then back to main
+
+*--------------------------------------------------------------------
 * Call here to get an address. Returns only if no errors. Exits from
 * here by tidying the stack and returning via the main loop.
 *--------------------------------------------------------------------
@@ -2470,7 +2579,9 @@ GTAD1_RTS RTS                       ; Done
 INDIRECT  BSR.S     GETADDR1        ; Evaluate an address expression
           BCLR      #0,D1           ; Make the address even
           MOVE.L    D1,A1           ; Copy the new address
-          MOVE.L    (A1),MEMPTR(A6) ; Set current memory address
+          MOVE.L    (A1),D1         ; get contents
+          MOVE.L    D1,MEMPTR(A6)   ; Set current memory address
+          JSR       LH_PUT
           BRA.S     SMEM_1          ; Exit via the main loop
 
 *--------------------------------------------------------------------
@@ -2479,6 +2590,7 @@ INDIRECT  BSR.S     GETADDR1        ; Evaluate an address expression
 *--------------------------------------------------------------------
 SMEMPTR   BSR.S     GETADDR1        ; Evaluate an address expression
           MOVE.L    D1,MEMPTR(A6)   ; Store it directly, may be odd!
+          JSR       LH_PUT
 
 *--------------------------------------------------------------------
 * Common exit routine for setting the current memory pointer. Exit
@@ -2488,7 +2600,7 @@ SMEMPTR   BSR.S     GETADDR1        ; Evaluate an address expression
 SMEM_1    BSR       DSPMEM          ; 8 bytes either side in hexadecimal
           BSR       DSPDIS          ; Dissassemble one instruction
 
-MAIN_2A   BRA       MAIN_2          ; Go around again
+MAIN_2A   BRA       MAIN_2          ; Go around again (don't print LF)
 
 *--------------------------------------------------------------------
 * R: Set (current) register to a new value.
@@ -2691,7 +2803,7 @@ BRKERMSG  STRING$   {LF,'Cannot set breakpoint (ROM?)'}
 * A4 is set up as the current memory address (made even).
 *--------------------------------------------------------------------
 DIS_PAGE  MOVEQ     #SD_CURS,D0
-          TRAP      #3              ; Enable the cursor (COMMAND Window)
+          TRAP      #3              ; Disable the cursor (COMMAND Window)
           BSR       ESC_MSG         ; PROMPT window - press ESC ....
           MOVE.L    AUXWND(A6),A0   ; Use the AUX window for disassembly
           MOVEQ     #-1,D3          ; Timeout
@@ -2763,8 +2875,8 @@ DP_MNEM   MOVE.W    D4,D2           ; How many bytes to print
 * Clear the AUX and COMMAND WINDOWS before skipping back to the
 * main loop.
 *--------------------------------------------------------------------
-DP_END    MOVE.L    AUXWND(A6),A0   ; Use the AUX WINDOW
-          MOVEQ     #SD_CLEAR,D0    ; Clear it
+DP_END    MOVE.L    PROMPTWND(A6),A0 ; Prompt window (overlaps all)
+          MOVEQ     #SD_CLEAR,D0    ; Clear all of windows
           TRAP      #3
           MOVE.L    CMDWND(A6),A0   ; Use the COMMAND WINDOW
           MOVEQ     #SD_CLEAR,D0    ; Clear it
@@ -2777,7 +2889,11 @@ DP_END    MOVE.L    AUXWND(A6),A0   ; Use the AUX WINDOW
 *--------------------------------------------------------------------
 ESC_MSG   MOVE.L    PROMPTWND(A6),A0    ; Use the PROMPT window
           MOVEQ     #-1,D3
-          MOVEQ     #SD_CLEAR,D0    ; Clear it
+          MOVEQ     #0,D1
+          MOVEQ     #0,D2
+          MOVEQ     #SD_POS,D0
+          TRAP      #3
+          MOVEQ     #SD_CLRLN,D0    ; Clear it
           TRAP      #3
           LEA       ESCPROMPT,A1    ; Any key to continue...
           MOVE.W    UT_MTEXT,A2
@@ -2793,22 +2909,26 @@ ESCPROMPT DC.W      42
 * F2: List memory to screen
 *--------------------------------------------------------------------
 MEMDUMP   MOVEQ     #SD_CURS,D0
-          TRAP      #3              ; Enable the cursor
+          TRAP      #3              ; disable the cursor
           MOVE.L    PROMPTWND(A6),A0    ; In the PROMPT window
-          MOVEQ     #SD_CLEAR,D0
+          MOVEQ     #0,D1
+          MOVEQ     #0,D2
+          MOVEQ     #SD_POS,D0
+          TRAP      #3
+          MOVEQ     #SD_CLRLN,D0
           TRAP      #3              ; Clear the PROMPT window
           MOVEQ     #0,D1           ; 6 Pixels wide
           MOVEQ     #0,D2           ; 10 Pixels high
           MOVEQ     #SD_SETSZ,D0
           TRAP      #3              ; Set character size
-          MOVEQ     #61,D1          ; 61 Pixels across
+          MOVEQ     #63,D1          ; 61 Pixels across
           MOVEQ     #0,D2           ; And zero down
           MOVEQ     #SD_PIXP,D0
           TRAP      #3              ; Set print position
           LEA       MD_MSG1,A1      ; Heading
           MOVE.W    UT_MTEXT,A2
           JSR       (A2)            ; Print the heading
-          MOVE.W    #352,D1         ; 334 Pixels across
+          MOVE.W    #354,D1         ; 334 Pixels across
           MOVEQ     #0,D2           ; Zero down
           MOVEQ     #SD_PIXP,D0
           TRAP      #3              ; Set print position
@@ -2826,7 +2946,12 @@ MEMDUMP   MOVEQ     #SD_CURS,D0
 * dumped to the screen. There is no prompt at the end of each page to
 * press ESC - it is assumed we know.
 *--------------------------------------------------------------------
-MD_PAGE   MOVEQ     #18,D7          ; 19 Lines per page
+          SUBQ.L    #8,A7           ; Make room for buffer
+          MOVE.L    A7,A1
+          MOVEQ     #SD_CHENQ,D0
+          TRAP      #3              ; Get size of window
+          SUBQ.W    #1,2(A7)        ; adjust height for DBRA later
+MD_PAGE   MOVE.W    2(A7),D7        ; Lines per page - 1
 
 *--------------------------------------------------------------------
 * The start address, the current memory pointer, is in A4 but we now
@@ -2891,6 +3016,7 @@ MD3       MOVE.L    D1,A4           ; Adjusted start address
           TRAP      #3              ; Wait for a keypress
           CMPI.B    #$1B,D1         ; ESC?
           BNE.S     MD_PAGE         ; No, do another page
+          ADDQ.L    #8,A7           ; Remove SD.CHENQ buffer
           BRA       DP_END          ; Yes, clear AUX & COMMAND windows
 
 *--------------------------------------------------------------------
@@ -3125,6 +3251,8 @@ FH_DEFLT  MOVE.W    (A5)+,D7        ; Use existing counter
 FH_MEM    MOVE.L    MEMPTR(A6),A3   ; Start address = current memory pointer
 
 FH_LOOP   ADDQ.W    #1,A3           ; Increment start address
+          CMPA.L    TOP_PNT(A6),A3  ; Above TP?
+          BCC.S     FH_NOTF         ; yes, end of search
           MOVE.W    D7,D6           ; Copy byte count           
           MOVE.L    A5,A4           ; Copy Start of search text
           MOVE.L    A3,A2           ; Copy start of search address
@@ -3149,6 +3277,14 @@ FH_END    MOVE.L    A3,MEMPTR(A6)   ; Save new memory pointer
           BSR       DSPMEM          ; Display 8 bytes around new address
           BSR       DSPDIS          ; One line disassembly
           BRA       MAIN_2          ; BAck into main loop
+
+FH_NOTF   LEA       FH_MSG,A1
+          MOVE.L    CMDWND(A6),A0
+          MOVE.W    UT_MTEXT,A2
+          JSR       (A2)
+          BRA       FH_END
+          
+FH_MSG    STRING$   {'End of search area reached',LF}
 
 *--------------------------------------------------------------------
 * H: Convert binary/decimal/hexadecimal to Hexadecimal.
@@ -3248,23 +3384,23 @@ CH_OFFSET NOT.B     RELMOD(A6)
 * On error, resume from MAIN_2 and if the user chooses not to trash
 * an existing file, resume from MAIN_1 instead, otherwise just RTS.
 *--------------------------------------------------------------------
-OPEN_FILE LEA       FN_MSG,A1       ; 'File Name' prompt
+OPEN_FILE CLR.W     DISBUF(A6)      ; entry point if no default
+OPEN_FD   LEA       FN_MSG,A1       ; 'File Name' prompt
           MOVE.W    UT_MTEXT,A2
           JSR       (A2)            ; Print prompt
-          BSR       RDSTRING        ; Read the desired filename
+          JSR       RDSTRING        ; Read/edit the desired filename
           BNE.S     OP_ERR          ; Exit with errors
 OP_AGAIN  LEA       DISBUF(A6),A0   ; Get the filename
-          MOVEQ     #-1,D1          ; This job's ID
+          MOVE.L    SYSVARS(A6),A1
+          LEA       SV_DATAD(A1),A1 ; data default
           MOVE.L    D4,D3           ; Open Type 
-          MOVEQ     #IO_OPEN,D0
-          TRAP      #2              ; Open the file
-          TST.L     D0              ; OK?
-          BEQ.S     OP_OK           ; Yes indeed
+          JSR       OPEN_DEF        ; open file if possible
+          BEQ.S     OP_OK           ; OK? Yes indeed
 
           ADDQ.L    #8,D0           ; File already exists?
           BEQ.S     OP_EXISTS       ; Yes it does
-
           SUBQ.L    #8,D0           ; Reset the error code
+
 OP_ERR    MOVE.L    CMDWND(A6),A0   ; COMMAND CHANEL
           MOVE.W    UT_ERR,A2
           JSR       (A2)            ; Print error message
@@ -3592,6 +3728,71 @@ OPC_MSG   DC.B      0,24,'Suppress opcode ? (Y/N) '
 *--------------------------------------------------------------------
 DATA_MSG  DC.B      0,12,$0A,'Data areas',$0A
 
+*--------------------------------
+* Write memory to file (at last!)
+*--------------------------------
+
+WR_GET    MOVE.L   A0,-(A7)
+          LEA      DISBUF(A6),A0
+          JSR      CN_HEXL
+          MOVE.L   CMDWND(A6),A0
+          MOVE.W   UT_MTEXT,A2
+          JSR      (A2)
+          LEA      DISBUF(A6),A2
+          MOVEQ    #8,D1
+          JSR      RDLIN_2
+          BNE.S    WRG_END
+          JSR      GTAD_EVL
+WRG_END   MOVE.L   (A7)+,A0
+          RTS
+
+WR_FILE   LEA      EXJBFNAM(A6),A1
+          LEA      DISBUF(A6),A2
+          BSR.S    COPYSTRG         ; copy Examined job fn as default
+          MOVEQ    #2,D4
+          BSR      OPEN_FD          ; open for writing
+          MOVE.L   BASE_PNT(A6),D1  ; default start address
+          LEA      FIRSTMSG,A1
+          BSR      WR_GET
+          BNE.S    WRF_CLOS
+          MOVE.L   D1,D4            ; start address
+          MOVE.L   EXJB_LEN(A6),D1  ; length of code
+          BEQ.S    WRF_TOP          ; skip if existing job
+          ADD.L    D4,D1            ; else form end of code for default
+          BRA.S    WRF_LAST
+WRF_TOP   MOVE.L   TOP_PNT(A6),D1   ; default end address
+WRF_LAST  LEA      LASTMSG,A1
+          BSR      WR_GET
+          BNE.S    WRF_CLOS
+          MOVE.L   D1,D5            ; end address
+          MOVE.L   EXJB_DAT(A6),D1  ; default data size
+          LEA      DATAMSG,A1
+          BSR      WR_GET           ; data size
+          BNE.S    WRF_CLOS
+          LEA      DISBUF(A6),A1    ; prepare header
+          CLR.L    (A1)
+          CLR.W    4(A1)            ; assume type 0
+          TST.L    D1               ; any data size?
+          BEQ.S    WRF_DAT          ; no
+          ADDQ.B   #1,5(A1)         ; else, set type 1
+WRF_DAT   MOVE.L   D1,6(A1)         ; data size
+          CLR.L    10(A1)           ; extra field
+          MOVEQ    #-1,D3
+          MOVEQ    #FS_HEADS,D0
+          TRAP     #3               ; set header
+          MOVE.L   D4,A1            ; start address
+          MOVE.L   D5,D2            ; end address
+          SUB.L    A1,D2            ; form length in D2
+          MOVEQ    #FS_SAVE,D0
+          TRAP     #3               ; write it!
+WRF_CLOS  MOVE.L   D0,D4            ; save any error code
+          MOVEQ    #IO_CLOSE,D0
+          TRAP     #2               ; close file
+          MOVE.L   D4,D0            ; restore error
+          BRA      PRT_ERR          ; print error (if any)
+
+DATAMSG   STRING$  {'Data size'}
+
 *-------------------------------------------------------------
 * Small subroutine to copy a QL-style string from (A1) to (A2)
 * All registers preserved
@@ -3601,7 +3802,7 @@ COPYSTRG  MOVEM.L   D0/A1-A2,-(A7)
           MOVE.W    D0,(A2)+
           BRA.S     CSTR_L2
 CSTR_L1   MOVE.B    (A1)+,(A2)+
-CSTR_L2   DBF       D0,CSTR_L2
+CSTR_L2   DBF       D0,CSTR_L1
           MOVEM.L   (A7)+,D0/A1-A2
           RTS
 
@@ -3611,20 +3812,33 @@ CSTR_L2   DBF       D0,CSTR_L2
 * Here we are prompted to enter a job id or a filename that will be
 * loaded as a new job (but not started) which we can monitor.
 *--------------------------------------------------------------------
-EXAMINE   JSR       RDSTRING        ; Read the jobid, or filename
-          BNE       PRT_ERR         ; Exit with any error
-EXAM_2    CLR.W     EXJBFNAM(A6)    ; Clear file name
-          ADDQ.W    #2,A1           ; Skip the word count
+EXAMINE   CLR.W     DISBUF(A6)      ; start with empty input
+EX_AGAIN  JSR       RDSTRING        ; Read/edit the jobid, or filename
+          BMI       PRT_ERR         ; Exit with any error
+          BEQ.S     EX_RD           ; go ahead with proper input
+          LEA       EXJBFNAM(A6),A1 ; user responded with up-arrow...
+          LEA       DISBUF(A6),A2   ; so copy any existing file name
+          BSR       COPYSTRG        ; to buffer
+          BRA       EX_AGAIN        ; and retry input
+EX_RD     ADDQ.W    #2,A1           ; Skip the word count
           JSR       READHEX         ; Try to convert to a value in D1
           BNE.S     EX2             ; Invalid characters - try a file
           CMPI.B    #LF,(A1)        ; Valid input?
-          BEQ.S     GET_JB          ; Yes, skip
-
+          BNE.S     EX2             ; No, try filename
+          CLR.W     EXJBFNAM(A6)    ; clear file name
+          CLR.L     EXJB_LEN(A6)    ; clear header fields
+          CLR.W     EXJB_TYP(A6)
+          CLR.L     EXJB_DAT(A6)
+          BRA       GET_JB
 *--------------------------------------------------------------------
 * The jobid was invalid, so we attempt a file open here.
 *--------------------------------------------------------------------
-EX2       MOVEQ     #1,D4           ; Open mode - old shared (OPEN_IN)
-          BSR       OP_AGAIN        ; Try to open it (doesn't return if error)
+EX2       MOVEQ     #1,D3           ; Open mode - old shared (OPEN_IN)
+          LEA       DISBUF(A6),A0
+          MOVE.L    SYSVARS(A6),A1
+          LEA       SV_DATAD(A1),A1
+          JSR       OPEN_DEF        ; Try to open it (with DATAD$ default)
+          BNE       PRT_ERR
           LEA       DISBUF(A6),A1   ; Working buffer
           LEA       EXJBFNAM(A6),A2 ; Where to store the file name
           BSR       COPYSTRG        ; Save filename
@@ -3638,16 +3852,19 @@ EX2       MOVEQ     #1,D4           ; Open mode - old shared (OPEN_IN)
 *** Removed test for EXECable file, useful for examining LRESPRable
 *** files. Of course, no attempt should be made to EXEC these...
 *
-*          MOVEQ     #-15,D0         ; Assume bad parameter error
-*          SUBQ.B    #1,DISBUF+5(A6) ; File type, EXECutable = 1
-*          BNE.S     EX_ERR          ; Not EXECutable, bale out
+;          MOVEQ     #-15,D0         ; Assume bad parameter error
+;          SUBQ.B    #1,DISBUF+5(A6) ; File type, EXECutable = 1
+;          BNE.S     EX_ERR          ; Not EXECutable, bale out
 *--------------------------------------------------------------------
           MOVE.L    A0,-(A7)        ; Save channel id for file
           MOVE.L    DISBUF(A6),D2   ; File size from header
           MOVE.L    D2,EXJB_LEN(A6) ; Store it
+          ASSERT    EXJB_LEN,EXJB_TYP-4,EXJB_DAT-6
           MOVEQ     #0,D3           ; Assume dataspace of 0 bytes
-          SUBQ.B    #1,DISBUF+5(A6) ; Test for EXECable file
-          BNE.S     EX3             ; Skip if not (avoids junk in D3)          
+          MOVE.W    D3,EXJB_TYP(A6) ; assume file type 0
+          CMPI.B    #1,DISBUF+5(A6) ; Test for EXECable file
+          BNE.S     EX3             ; Skip if not (avoids junk in D3)
+          ADDQ.W    #1,EXJB_TYP(A6) ; set file type
           MOVE.L    DISBUF+6(A6),D3 ; Data space from header
 EX3       MOVE.L    D3,EXJB_DAT(A6) ; Store data size
           MOVEQ     #-1,D1          ; This job is the owner job
@@ -3707,6 +3924,7 @@ COPY_REG  TRAP      #0              ; Supervisor mode
           BSR       SETVECS         ; Set exception vectors
           BSR.S     EXAM_REGS       ; Copy registers etc to storage
           ANDI      #$DFFF,SR       ; User mode again
+          JSR       LH_PUT
           BSR       DSPREG          ; Display registers
           BSR       DSPMEM          ; Display 16 bytes around mem pointer
           BSR       DSPDIS          ; Display one line of disassembly
@@ -3963,20 +4181,34 @@ TO_MSG    DC.B      0,2,'To'
 * On the last line, the free memory total can be negative for very
 * large QL emulations. :-(
 *--------------------------------------------------------------------
-VERSION   LEA       JOBSMSG,A1      ; Job id, owner etc heading line
+VERSION   MOVEQ     #SD_CURS,D0
+          TRAP      #3              ; Disable the cursor (COMMAND Window)
+          BSR       ESC_MSG         ; PROMPT window - press ESC ....
+          MOVE.L    AUXWND(A6),A0   ; Use the AUX (listing) window now
+          MOVEQ     #-1,D3          ; Timeout
+          MOVEQ     #SD_CLEAR,D0
+          TRAP      #3              ; Clear the AUX Window
+          SUBQ.L    #8,A7           ; Make room for buffer
+          MOVE.L    A7,A1
+          MOVEQ     #SD_CHENQ,D0
+          TRAP      #3              ; Get size of window
+          LEA       JOBSMSG,A1      ; Job id, owner etc heading line
           MOVE.W    UT_MTEXT,A2
           JSR       (A2)            ; Print heading to COMMAND channel
-          MOVE.L    SYSVARS(A6),A3  ; Base of system variables
-          MOVE.L    $68(A3),A5      ; SV_JBBAS - start of job table
-          SUBQ.W    #4,A5           ; Prepare for code at NXTJOB
-          MOVEQ     #2,D7           ; First screen = 3 jobs only
+;          MOVE.L    SYSVARS(A6),A3  ; Base of system variables
+;          MOVE.L    $68(A3),A5      ; SV_JBBAS - start of job table
+;          SUBQ.W    #4,A5           ; Prepare for code at NXTJOB
+          MOVE.W    2(A7),(A7)      ; Set counter for first screen
+          SUBQ.W    #1,(A7)         ; discount heading
+          MOVEQ     #0,D1           ; set D1=D2=0 for 'top of jobs tree'
+          MOVEQ     #0,D2
           BRA.S     NXTJOB          ; Skip to do it
 
 *--------------------------------------------------------------------
 * The COMMAND window can show 4 lines on each page. The first page had
 * three plus the headings - the rest need 4 as there are no headings.
 *--------------------------------------------------------------------
-JOBLOOP   MOVEQ     #3,D7           ; 4 jobs per page now
+JOBLOOP   MOVE.W    2(A7),(A7)      ; 'window height' jobs per page now
 
 *--------------------------------------------------------------------
 * This is the D7 loop to display 3 or 4 jobs per page.
@@ -3985,26 +4217,24 @@ JOBLOOP   MOVEQ     #3,D7           ; 4 jobs per page now
 * A4 is the job's address in memory.
 * A0 is the buffer to be output for each job.
 *--------------------------------------------------------------------
-NXTJOB    ADDQ.W    #4,A5           ; Point at next job table entry
-
-          CMPA.L    $6C(A3),A5      ; SV_JBTOP = are we done?
-          BGE       ENDJB           ; Yes, exit
-          TST.B     (A5)            ; $FF000000 = inactive job
-          BLT.S     NXTJOB          ; Job is inactive, ignore it
-          MOVE.L    (A5),A4         ; JB_END for this active job
-
-          MOVE.L    A5,D1           ; Job table entry address
-          SUB.L     $68(A3),D1      ; Minus job table start (SV_JBBAS)
-          LSR.W     #2,D1           ; 4 bytes per entry so divide
-          SWAP      D1              ; Keep job id (table entry number)
-          MOVE.W    $10(A4),D1      ; Get job's tag from JB_TAG
-          SWAP      D1              ; TAG | ID = 'Job ID'
+NXTJOB    MOVE.L    D1,D4           ; save current job ID
+          MOVEQ     #MT_JINF,D0
+          TRAP      #1              ; get next job's info
+          TST.L     D0
+          BNE       ENDJB           ; oops.. it has gone?
+          MOVE.L    D1,D7           ; next job in tree
+          MOVE.L    D2,D5           ; save owner job
+          MOVE.L    A0,A4           ; save address
           LEA       DISBUF(A6),A0   ; Buffer address
+          MOVE.L    D4,D1           ; current job id
           JSR       CN_HEXL         ; Buffer job id in hex
           MOVE.W    #$2020,(A0)+    ; And two spaces
-          MOVE.L    8(A4),D1        ; JB_OWNER = job's parent
+          MOVE.L    D2,D1           ; JB_OWNER = job's parent
           JSR       CN_HEXL         ; Buffer it in hex
           MOVE.W    #$2020,(A0)+    ; And two more spaces
+          MOVE.L    A4,D1           ; job's address
+          JSR       CN_HEXL         ; buffer it
+          MOVE.W    #$2020,(A0)+
 
 *--------------------------------------------------------------------
 * ???? -> BUGFIX
@@ -4018,48 +4248,51 @@ NXTJOB    ADDQ.W    #4,A5           ; Point at next job table entry
 * So we should possibly test for -2 and flag 'W' for waiting, -1 is
 * the only (?) flag for 'S' (Suspended) etc?
 *--------------------------------------------------------------------
-          TST.W     $14(A4)         ; JB_STAT = 0 = active
+          MOVE.W    D3,D6           ; JB_STAT = 0 = active
           BGE.S     NOT_SUSP        ; Job is active or delayed for rescehdule
-          CMPI.W    #-2,$14(A4)     ; Is job waiting for another?
-          BEQ.S     JOB_WAIT        ; Yes, skip
 
           MOVE.B    #'S',-1(A0)     ; Show job as suspended
-          BRA.S     NOT_SUSP        ; Skip waiting code
-
-JOB_WAIT  MOVE.B    #'W',-1(A0)     ; Show job is waiting
 
 *--------------------------------------------------------------------
 * The job being looked at is not suspended (but see above) and the 
 * output buffer looks like 'IIIIIIII  OOOOOOOO  '
 *--------------------------------------------------------------------
-NOT_SUSP  MOVE.L    CMDWND(A6),A0   ; COMMAND channel id
+NOT_SUSP  MOVE.L    AUXWND(A6),A0   ; Listing channel id
           MOVEQ     #10,D1          ; Linefeed to print
           MOVEQ     #-1,D3          ; Timeout
           MOVEQ     #IO_SBYTE,D0
           TRAP      #3              ; Print a linefeed
-
           LEA       DISBUF(A6),A1   ; Buffer start
-          MOVEQ     #20,D2          ; 20 bytes to print
+          MOVEQ     #30,D2          ; 30 bytes to print
           MOVEQ     #IO_SSTRG,D0
           TRAP      #3              ; Print job id, owner and suspended flag
           MOVEQ     #0,D1
-          MOVE.B    $13(A4),D1      ; JB_PRINC = priority increment
+          MOVE.B    D6,D1           ; JB_PRINC = priority increment
           MOVE.W    UT_MINT,A2
           JSR       (A2)            ; Print JB_PRINC to screen
-          MOVEQ     #24,D1          ; Tab 24
+          MOVEQ     #34,D1          ; Tab 34
           MOVEQ     #SD_TAB,D0
           TRAP      #3              ; Set tab position
-          LEA       $68+6(A4),A1    ; Job's code start address
+          LEA       EXJBFNAM(A6),A1 ; assume job's name in filename buffer
+          CMP.L     EXJB_ID(A6),D4  ; is current job being examined?
+          BNE.S     V_4AFB          ; no, get name from job start
+          TST.W     (A1)            ; valid file name?
+          BNE.S     V_NAME          ; yes, go print it
+V_4AFB    LEA       6(A4),A1        ; Job's code start address
           CMPI.W    #$4AFB,(A1)+    ; Should be $4AFB for a valid job
-          BNE.S     NONAME          ; Nope, job has no name
-          MOVE.W    UT_MTEXT,A2
+          BNE.S     NONAME          ; Jump to print the name
+V_NAME    MOVE.W    UT_MTEXT,A2
           JSR       (A2)            ; Print job's name from its code
+NONAME    MOVE.L    D5,D2           ; owner job's id saved in D5
+          MOVE.L    D7,D1           ; next job's id saved in D4
+          BEQ.S     ENDJB           ; end of job's tree - bail out
 
 *--------------------------------------------------------------------
-* The end of a D7 page of jobs, do some more if we still have spare
+* The end of a (A7) page of jobs, do some more if we still have spare
 * lines in D7.
 *--------------------------------------------------------------------
-NONAME    DBF       D7,NXTJOB       ; Complete one page of jobs
+          SUBQ.W    #1,(A7)
+          BNE       NXTJOB          ; Complete one page of jobs
 
 *--------------------------------------------------------------------
 * Page is complete, wait for any key. On receipt, restart a new page
@@ -4074,9 +4307,9 @@ NONAME    DBF       D7,NXTJOB       ; Complete one page of jobs
 * if we have space on the current page to output additional QDOS info
 * or if we have to wait for a keypress again.
 *--------------------------------------------------------------------
-ENDJB     MOVE.L    CMDWND(A6),A0   ; COMMAND window ID
+ENDJB     MOVE.L    AUXWND(A6),A0   ; Listing window ID
           MOVEQ     #-1,D3          ; Timeout
-          TST.W     D7              ; Got room on this page?
+          SUBQ.W    #1,(A7)         ; Got room on this page?
           BGT.S     ENDJ1           ; Yes, skip
           MOVEQ     #IO_FBYTE,D0    ; No room on this page
           TRAP      #3              ; Wait for a keypress again
@@ -4093,7 +4326,7 @@ ENDJ1     LEA       VER_MSG,A1      ; 'QDOS Version: ' message
           JSR       (A2)            ; Print message
           MOVEQ     #MT_INF,D0
           TRAP      #1              ; Get system information
-          MOVE.L    CMDWND(A6),A0   ; COMMAND window ID
+          MOVE.L    AUXWND(A6),A0   ; Listing window ID
           LEA       DISBUF(A6),A1   ; Output buffer
           MOVE.L    D2,(A1)         ; QDOS version 'x.xx'
           MOVEQ     #4,D2           ; 4 bytes to print
@@ -4123,30 +4356,34 @@ ENDJ1     LEA       VER_MSG,A1      ; 'QDOS Version: ' message
           LSR.L     #8,D1           ; Divide by 1024 again
           LSR.L     #2,D1
 
-V_FREE    MOVE.L    CMDWND(A6),A0   ; COMMAND window ID
+V_FREE    MOVE.L    AUXWND(A6),A0   ; Listing window ID
           MOVE.W    UT_MINT,A2      ; Prepare to print a word
           JSR       (A2)            ; Print free memory in KB
           MOVE.B    D7,D1           ; Needs a 'K' or 'M'
           MOVEQ     #IO_SBYTE,D0
           TRAP      #3              ; Print it.
-          BRA       MAIN_1
+          ADDQ.L    #8,A7           ; remove sd.chenq buffer
+          MOVE.L    CMDWND(A6),A0   ; Watch the COMMAND WINDOW
+          MOVEQ     #IO_FBYTE,D0    ; for a key press
+          TRAP      #3
+          BRA       DP_END          ; Clear windows and renter main loop
 
 *--------------------------------------------------------------------
 * Headings for the V command when displaying job details.
 *--------------------------------------------------------------------
-JOBSMSG   DC.B      0,30,10,'Job ID    Owner    Prior Name'
+JOBSMSG   STRING$   {'Job ID    Owner     Address  Prior Name'}
           DS.W      0
 
 *--------------------------------------------------------------------
 * HEadings for the V command when displaying the QDOS version.
 *--------------------------------------------------------------------
-VER_MSG   DC.B      0,15,10,'QDOS Version: '
+VER_MSG   STRING$   {LF,LF,'QDOS Version: '}
           DS.W      0
 
 *--------------------------------------------------------------------
 * HEadings for the V command when displaying free memory.
 *--------------------------------------------------------------------
-FREEMSG   DC.B      0,15,'  Free Memory: ',0
+FREEMSG   STRING$   {'  Free Memory: '}
           DS.W      0
 
 *--------------------------------------------------------------------
@@ -4155,7 +4392,11 @@ FREEMSG   DC.B      0,15,'  Free Memory: ',0
 HELP      MOVEQ     #SD_CURS,D0     ; Enable the cursor
           TRAP      #3
           MOVE.L    PROMPTWND(A6),A0    ; In the PROMPT WINDOW
-          MOVEQ     #SD_CLEAR,D0    ; And clear the screen
+          MOVEQ     #0,D1
+          MOVEQ     #0,D2
+          MOVEQ     #SD_POS,D0
+          TRAP      #3
+          MOVEQ     #SD_CLRLN,D0    ; And clear the screen
           TRAP      #3
           LEA       HELPMSG1,A1     ; "Continue" message
           MOVE.W    UT_MTEXT,A2
@@ -4193,21 +4434,23 @@ HLP1_END  EQU       *
 *--------------------------------------------------------------------
 HELPMSG2  DC.W      HLP2_END-*-2
           DC.B      '                             QL MULTIMON V[version]',10
-          DC.B      '                       ',127,' 1986-2025 BY JAN BREDENBEEK',10,10
-          DC.B      'COMMANDS:',10,10
-          DC.B      188,189,190,191,': CHANGE MEMORY POINTER            ALT-',188,189,190,191,': CHANGE REGISTER POINTER',10
-          DC.B      'F2: MEMORY DUMP TO SCREEN              F3: DISASSEMBLE TO SCREEN',10
-          DC.B      'A: ALTER MEMORY                        B: SET BREAKPOINT',10
-          DC.B      'C: CALL A SUBROUTINE                   D: DISASSEMBLE TO FILE',10
-          DC.B      'E: EXAMINE A JOB                       F: FILL MEMORY',10
-          DC.B      'G: CONVERT TO DEC                      H: CONVERT TO HEX',10
-          DC.B      'I: SET MEMORY POINTER INDIRECT         J: JUMP TO LOCATION',10
-          DC.B      'K: COPY BLOCK OF MEMORY                L: LIST MEMORY TO FILE',10
-          DC.B      'M: SET MEMORY POINTER                  N: ADJUST MEMORY POINTER',10
-          DC.B      'O: CHANGE RELATIVE MODE                Q: QUIT',10
-          DC.B      'R: SET REGISTER VALUE                  S: SEARCH FOR HEX STRING',10
-          DC.B      'T: TRACE CURRENT INSTRUCTION           U: REMOVE BREAKPOINT',10
-          DC.B      'V: SYSTEM INFO                         X: EXECUTE CURRENT INSTRUCTION',10
+          DC.B      '                       ',127,' 1986-2025 By Jan Bredenbeek',10
+          DC.B      'Commands:',10,10
+          DC.B      188,189,190,191,': Change Memory Pointer            ALT-',188,189,190,191,': Change Register Pointer',10
+          DC.B      'CTRL-',188,189,': Back/Forward in history       F2: Memory dump to screen',10
+          DC.B      'F3: Disassemble to screen              F5: Refresh screen',10
+          DC.B      'A: Alter memory                        B: Set breakpoint',10
+          DC.B      'C: Call a subroutine                   D: Disassemble to file',10
+          DC.B      'E: Examine a job                       F: Fill memory',10
+          DC.B      'G: Convert to dec                      H: Convert to hex',10
+          DC.B      'I: Set memory pointer indirect         J: Jump to location',10
+          DC.B      'K: Copy block of memory                L: List memory to file',10
+          DC.B      'M: Set memory pointer                  N: Adjust memory pointer',10
+          DC.B      'O: Change relative mode                Q: Quit',10
+          DC.B      'R: Set register value                  S: Search for hex string',10
+          DC.B      'T: Trace current instruction           U: Remove breakpoint',10
+          DC.B      'V: System info                         W: Write memory to file',10
+          DC.B      'X: Execute current instruction         CTRL-F: Follow destination address',10
 HLP2_END  EQU       *
 
           END
